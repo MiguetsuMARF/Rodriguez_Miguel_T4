@@ -489,4 +489,111 @@ Las dos personas mas populares
 ```{r}
 sort(degree(red), decreasing = TRUE)[c(1,2)]
 ```
+### Red PPI
+
+```{r}
+library(igraphdata)
+
+data("yeast")
+
+class(yeast)
+
+## Distribucion de conexiones
+
+yeast_p <- Red_propiedades(yeast)
+
+# Primero en el eje de las x asignamos los valores de degree que se presentan en la red.
+x <- as.numeric(names((table(yeast_p$Degree))))
+
+# Y despues en el eje de las y asignamos en orden las frecuencias obtenidas para cada valor de degree
+y <- sort((table(yeast_p$Degree)), decreasing = TRUE)
+
+# log log, vamos a graficar los ejes antes calculados con su respectivo logaritmo en cada eje.
+
+plot(log(x), log(y), xlab = "Log(degree)", ylab = "Log(Frecuencia)", main = "Distribución de conectividades Proteína-Proteína (log-log)")
+```
+10 proteinas mas conectadas
+
+```{r}
+sort(degree(yeast), decreasing = TRUE)[c(1:10)]
+```
+Diamentro 
+
+```{r}
+yeast_p$Diametro
+```
+Promedio de distancias
+
+```{r}
+mean(yeast_p$Matriz_distancia)
+
+is.connected(yeast)
+
+# Esto significa que dentro del grafo yeast hay subgrafos conectados entre si por edges pero que no tienen conexion entre ellos, por lo que, si queremos hacer el calculo de matriz de distancias entre nodos tenemos que hacerlo unicamente dentro de los subgrafos, ya que si no obtendremos infinito como respuesta ya que no es posible la conexion entre nodos de diferentes subgrafos.
+
+components <- components(yeast) # Aqui estamos extrayendo los componentes del grafo principal, de tal forma que estos componentes estan compuestos por los nodos conectados entre si, osea los subgrafos.
+
+media <- c()
+
+# Vamos a realizar un ciclo for para calcular la media de distancias en cada subgrafo que tenga mas de 1 nodo perteneciente.
+
+for (i in 1:(sort(components$membership, decreasing = TRUE)[1])) { # Aqui estamos haciendo que el ciclo for itere hasta el componente mas alto en el vector con la mayor cantidad de nodos en el calculo de componentes, es decir, encontramos aquel vector de componentes con la mayor cantidad de nodos y de ahi extraemos el componente mas grande que contiene para que se itere hasta el, de tal forma que pase por todos los componentes creados.
+  nodos <- which(components$membership == i) # Aqui estamos obteniendo los nodos que pertenecen al componente i.
+  subgrafo <- induced.subgraph(yeast, nodos) # Aqui creamos un subgrafo que contiene solo los nodos seleccionados por el componente.
+  if (gorder(subgrafo) > 1) { ## Aqui estamos condicionando el la iteracion del ciclo para que solo continue si el subgrafo generado tiene mas de 1 nodo. 
+    mdist <- distances(subgrafo) # calculamos la matriz de distancias del subgrafo.
+    media <- c(media, mean(mdist[mdist < Inf])) # calculamos la media omitiendo aquellos valores que podriamos tener un valor de infinito.
+  }
+}
+
+media
+
+## Estas son las medias de las distancias en aquellos subgrafos generados con mas de 1 nodo que los compone.
+```
+Funcion para elimiar nodos
+
+```{r, eval=FALSE}
+Robustness <- function(red, numero_nodos){
+  inter <- as.character(c(V(red))) 
+  res <- list(
+    Nodo_removido = c(rep(0, (numero_nodos + 1))),
+    Diametro = c(diameter(red), rep(0, numero_nodos)),
+    distancia_media = c(
+      mean(media), ## Voy a utilizar la media de las medias de los subgrafos con mas de 1 nodo para evitar hacer listas de listas
+      rep(0, numero_nodos)
+    )
+  )
+  for (i in 1:numero_nodos){
+    x <- sample(inter, 1)
+    inter <- inter[inter != x]
+    red <- delete.vertices(red, V(red)$x)
+    components <- components(red)
+    media2 <- c()
+    for (j in unique(components$membership)){
+      nodos <- which(components$membership == j)
+      subgrafo <- induced.subgraph(red, nodos) 
+      if (gorder(subgrafo) > 1) { 
+        mdist <- distances(subgrafo)
+        media2 <- c(media2, mean(mdist[mdist < Inf]))
+      }
+    }
+    res[[1]][(i + 1)] <- x 
+    res[[2]][(i + 1)] <- diameter(red)  
+    res[[3]][(i + 1)] <- mean(media2) 
+  }
+  return(res)
+}
+
+Robustness(yeast, 100)
+
+write.csv(Robustness(yeast, 100), "../Data/distancias.eliminandonodosppi.csv")
+```
+```{r}
+
+# Debido a que es un ciclo muy pesado el resultado esta precargado
+
+distanciasppi <- read.csv("../Data/distancias.eliminandonodosppi.csv")
+distanciasppi 
+
+```
 
