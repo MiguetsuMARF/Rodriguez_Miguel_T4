@@ -289,7 +289,7 @@ sort(dist, decreasing = TRUE)[1]
     Matriz_distancia = distances(red),
     Diametro = diameter(red),
     Nodos_mas_lejanos = sort(dist, decreasing = TRUE)[1],
-    Coeficiente_cluster = transitivity(red)
+    Coeficiente_cluster = transitivity(red, type = "local")
   )
   return(res)
 }
@@ -312,9 +312,6 @@ Red_propiedades(gF, directed = TRUE)
 karate <- make_graph("Zachary")
 karate
 plot(karate)
-
-# Obtenemos sus principales propiedades con la funcion anterior
-Red_propiedades(karate)
 ```
 • ¿Cuántos nodos y conexiones tiene?
 
@@ -596,4 +593,245 @@ distanciasppi <- read.csv("../Data/distancias.eliminandonodosppi.csv")
 distanciasppi 
 
 ```
+
+Funcion para eliminar proteinas mas conectadas y calcular distancias cada que se elimina una
+
+```{r}
+No_prote_conectada <- function(red, no_protes){
+  d <- degree(red)
+  names(d) <- V(red)
+  inter <- as.character(names(sort(d, decreasing = TRUE)[1:no_protes]))
+  numero_nodos <- length(inter)
+  res <- data.frame(
+    Nodo_removido = c(rep(0, (numero_nodos + 1))),
+    Degree_Nodo_removido = c(rep(0, (numero_nodos + 1))),
+    Diametro = c(diameter(red), rep(0, numero_nodos)),
+    distancia_media = c(
+      mean(media), 
+      rep(0, numero_nodos)
+    )
+  )
+  for (i in 1:numero_nodos){
+    x <- inter[1]
+    inter <- inter[-1]
+    red2 <- delete.vertices(red, V(red)$x)
+    components <- components(red2)
+    media2 <- c()
+    for (j in unique(components$membership)){
+      nodos <- which(components$membership == j)
+      subgrafo <- induced.subgraph(red2, nodos) 
+      if (gorder(subgrafo) > 1) { 
+        mdist <- distances(subgrafo)
+        media2 <- c(media2, mean(mdist[mdist < Inf]))
+      }
+    }
+    res[[1]][(i + 1)] <- x 
+    res[[2]][(i + 1)] <- (sort(d, decreasing = TRUE)[1:no_protes])[i] 
+    res[[3]][(i + 1)] <- diameter(red)
+    res[[4]][(i + 1)] <- mean(media2)
+  }
+  return(res)
+}
+
+No_prote_conectada(yeast, 12)
+
+# Con el metodo que use no se observa diferencias en la distancia o en el diametro de la red al quitar los nodos con el mayor degree, mi teoria es que mi tecnica para calcular la distancia esta mal ejecutada.
+```
+
+Calcula el proemdio del coeficiente de clusterización. ¿Hay proteínas que tengan un coeficiente de clusterización de 1? Eso qué significa
+
+```{r}
+# Para calcular el coeficiente de clusterizacion tenemos que usar la funcion transitivity, luego eliminar los valores NA y calcular la media
+tra <- transitivity(yeast, type = "local")
+tra <- tra[which(tra <= 1 & tra >= 0)]
+mean(tra)
+
+length(which(tra == 1))
+```
+
+Como podemos ver la media es de 0.38 y la cantidad de proteinas con una transitividad de 1 son 216, esto significa que las proteinas con las que interactua la proteina A tienen el maximo de interacciones entre ellas.
+
+### Redes Biologicas
+
+Extraer del network repository la red de la corteza cerebral del raton
+
+```{r}
+graph_data_dir <- 'graph_data'
+network_repository_dir <- file.path(graph_data_dir, "network_repository")
+network_repository_zipdir <- file.path(network_repository_dir, "zips")
+url_i <- "https://nrvis.com/download/data/bn/bn-mouse_visual-cortex_1.zip"
+destfile_i <- file.path(network_repository_zipdir, basename(url_i))
+download.file(url_i, destfile = destfile_i, quiet = TRUE)
+unzip(destfile_i, exdir = paste0(network_repository_zipdir))
+g_file <- grep("\\.edges$", list.files(network_repository_dir, full.names = TRUE, recursive = TRUE), value = TRUE)[1]
+df_i <- read.delim(g_file, sep = " ", header = FALSE)
+df_i[] <- lapply(df_i, as.character)
+df_i <- df_i[!duplicated(df_i), ]
+mouse <- graph_from_data_frame(df_i, directed = FALSE)
+
+plot(mouse)
+```
+El codigo para extraer esta red biologica se obtuvo del [github de robertoshea](https://github.com/robertoshea/graph_isomorphism/blob/main/main)
+
+GeneraR la gráfica con todos los layouts disponibles
+
+```{r}
+coords <- layout_(mouse, as_star())
+coords2 <- layout_(mouse, as_tree())
+
+plot(mouse)
+plot(mouse, layout = coords)
+plot(mouse, layout = coords2)
+```
+Graficar la red con al menos tres medidas de centralidad.
+
+```{r}
+plot(mouse, layout = layout_nicely, vertex.size = degree(mouse)*3,
+     main = "Centralidad: degree")
+
+plot(mouse, layout = layout_nicely, vertex.size = betweenness(mouse)*0.5,
+     main = "Centralidad: betweenness")
+
+plot(mouse, layout = layout_nicely, vertex.size = closeness(mouse)*10*10*10,
+     main = "Centralidad: closeness")
+
+## se puede observar que en todas las medidas de centralidad destaca, sin embargo aquella con intervalos mayores es la de betwenness que recordemos es un valor que mide cuantas veces un nodo actua como un puente a lo largo del camino mas corto de otros nodos 
+```
+¿Qué tan densa es la red?
+
+```{r}
+length(E(mouse))/(length(V(mouse))*(length(V(mouse)-1)))/2
+
+length(E(mouse))
+(length(V(mouse))*(length(V(mouse)-1)))/2
+
+## Muy poco densa, teniendo 44 conexiones mientras que el maximo de conexiones que puede tener es de 420.5
+```
+Clusteriza la red con al menos tres métodos de clusterización. Gráfica la red con esos métodos.
+
+```{r}
+## Metodo 1: clustering por optimizacion multi-nivel de modularidad 
+
+cluster_louvain(mouse)
+
+## Clusteriza en 3 grupos.
+
+## Metodo 2: Clustering por caminos aleatorios cortos
+
+cluster_walktrap(mouse)
+
+## Clusteriza en 6 grupos.
+
+## Metodo 3: Clustering por metodos basados en mecanicas estadisticas
+
+cluster_spinglass(mouse)
+
+## Clusteriza en 5 grupos.
+
+## Metodo 4: Clustering por optimización greedy de la modularidad
+
+cluster_fast_greedy(mouse)
+
+## Clusteriza en 4 grupos.
+
+plot(mouse, vertex.color = membership(cluster_louvain(mouse)))
+plot(mouse, vertex.color = membership(cluster_walktrap(mouse)))
+plot(mouse, vertex.color = membership(cluster_spinglass(mouse)))
+plot(mouse, vertex.color = membership(cluster_fast_greedy(mouse)))
+```
+
+Se puede observar como, al evaluar los nodos de una red segun diferentes criterios de centralidad y de clusterizacion la visualizacion de esta varia drasticamente, por lo que es importante conocer las caracteristicas de la red a trabajar para saber que analisis es el optimo segun la naturaleza de los datos.
+
+### Red de coexpresion simulada
+
+Simula una matriz de expresión con 20 genes en 6 condiciones diferentes
+
+```{r}
+set.seed(43)
+genes <- c("gen1","gen2","gen3","gen4","gen5","gen6","gen7","gen8","gen9","gen10","gen11","gen12","gen13","gen14","gen15","gen16","gen17","gen18","gen19","gen20")
+condiciones <- c("CondicionA","CondicionB","CondicionC","CondicionD","CondicionF","CondicionG")
+valores <- c(sample(c(1:2000),20),sample(c(200:1000),20),sample(c(200:2500),20),sample(c(1000:1200),20),sample(c(1:500),20),sample(c(250:3000),20),sample(c(80:900),20))
+matriz_expresion <- matrix(valores, nrow = 20, ncol = 6)
+rownames(matriz_expresion) <- genes
+colnames(matriz_expresion) <- condiciones
+
+matriz_expresion <- t(matriz_expresion)
+
+matriz_expresion
+```
+Calcula la correlación entre todos los pares de genes.
+
+```{r}
+head(cor(matriz_expresion, method = "pearson"))
+```
+Construye una red de coexpresión utilizando un umbral de correlación \> 0.8.\
+
+```{r}
+matriz_adj <- (cor(matriz_expresion, method = "pearson") > 0.8) & (cor(matriz_expresion, method = "pearson") < 1)
+coexpresion <- graph_from_adjacency_matrix(matriz_adj, mode = "undirected", diag = FALSE)
+plot(coexpresion)
+```
+
+Calcula la distribución de grados.
+
+```{r}
+degree.distribution(coexpresion)
+
+plot(degree.distribution(coexpresion))
+```
+
+Identifica si hay módulos o agrupamientos de genes altamente correlacionados.
+
+```{r}
+cluster_louvain(coexpresion)
+
+plot(coexpresion, vertex.color = membership(cluster_louvain(coexpresion)))
+
+## Si se forman clusters de genes, este agrupamiento se hace por proximidad, como se puede apreciar en la visualizacion de la red clusterizada.
+```
+
+Visualiza la red y discute qué tipo de topología tiene.
+
+La red tiene una topologia altamente conectada, con gran cantidad de nodos con degree alto y pocos con degree bajo, esto se debe al metodo que utilice para construir la red, asignando intervalos definidos para cada tratamiento, por lo que la probabilidad de correlacion es muy alta ya que se comportan de manera similar los genes en cada muestreo (por los limites establecidos), sin embargo al intentar con una matriz totalmente aleatoria era muy dificil obtener un valor de correlacion alto.
+
+### Comparacion de redes
+
+Construye dos redes:
+
+-   Una red aleatoria tipo Erdos-Rényi.
+
+```{r}
+erdos <- erdos.renyi.game(25, p=0.2)
+plot(erdos)
+```
+
+-   Una red tipo "scale-free" usando el modelo Barabási–Albert.
+
+```{r}
+bara <- barabasi.game(25, directed = FALSE)
+plot(bara)
+```
+
+-   Compara su grado promedio, distribución de grados, coeficiente de clusterización y diámetro.
+
+```{r}
+rerdos <- Red_propiedades(erdos)
+rbara <- Red_propiedades(bara)
+
+mean(rerdos$Degree)
+mean(rbara$Degree)
+
+rerdos$Degreee_distribution
+rbara$Degreee_distribution
+
+rerdos$Diametro
+rbara$Diametro
+```
+
+Comparando el grado promedio podemos observar que con una red aleatoria se obtiene un promedio de conexiones alto, esto debido a la caracteristica de la distribucion de grados de este tipo de redes, donde hay una moda de degree y no hay una cola larga, a diferencia de la barabasi, donde hay mayor menor probabilidad de tener nodos con gran cantidad de conexiones, pero hay mayor variedad de degree, por lo que al observar en log log la distribucion observariamos una recta con pendiente 1 negativa.
+Por esto mismo al observar la distribucion de degree la tendencia de la red barabasi es de tener mayor frecuencia en nodos con poco degree y menor frecuencia en nodos con mayor degree, mientras que la red aleatoria tambien tiene una distribucion aleatoria de degree.
+Finalmente por esta caracteristica de poca densidad en barabasi la tendencia es de tener un mayor diametro, mientras que, la red aleatoria, debido a que mientras mayor son la cantidad de nodos con alto degree menor sera la distancia media entre nodos se puede observar que tiene un diametro menor.
+
+Las redes biologicas se comportan como el modelo barabasi, ya que tienen una mayor robustes ante perturbaciones azarosas, debido a que tener alta frecuencia de nodos con degree mayor seria comprometer la red ante perturbaciones ya que la probabilidad de atacar nodos importantes de la red es mayor, por lo que evolutivamente la tendencia de las redes ha sido priorizar una distribucion de degree tipo barabasi aunque esto represente aumentar la distancia media entre nodos.
+
 
